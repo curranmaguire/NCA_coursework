@@ -151,6 +151,7 @@ start_time = time.time()
 import random
 import math
 from collections import Counter
+import numpy as np
 
 ##########################################################
 #### NOW INITIALIZE YOUR PARAMETERS IMMEDIATELY BELOW ####
@@ -158,6 +159,15 @@ from collections import Counter
 num_cyc = 3
 b = 1
 N = 20
+group_size = int(N / 5)
+
+
+def calcDistance(origin, point, dimensions):
+    "origin is the detector and point is the space away from the detector"
+    squared = 0.0
+    for i in range(dimensions):
+        squared += (origin[i] - point[i]) ** 2
+    return np.sqrt(squared)
 
 
 def create_population(N, n):
@@ -184,10 +194,10 @@ def manhattan_distance(fittest, whale, n):
     return distance
 
 
-def circle_whale(n, new_whale, comparison_whale, whale, C, A, max_range, min_range):
+def circle_whale(n, new_whale, fittest_whale, whale, C, A, max_range, min_range):
     for i in range(n):
-        D = abs(C[i] * comparison_whale[1][i] - whale[1][i])
-        new_whale[i] = comparison_whale[1][i] - A[i] * D
+        D = abs(C[i] * fittest_whale[1][i] - whale[1][i])
+        new_whale[i] = fittest_whale[1][i] - A[i] * D
         if new_whale[i] > max_range[i]:
             new_whale[i] = max_range[i]
         elif new_whale[i] < min_range[i]:
@@ -195,30 +205,72 @@ def circle_whale(n, new_whale, comparison_whale, whale, C, A, max_range, min_ran
     return (compute_f(new_whale), new_whale)
 
 
-def search_whale(n, new_whale, comparison_whale, whale, C, A, max_range, min_range):
-    for i in range(n):
-        D = abs(C[i] * comparison_whale[i] - whale[1][i])
-        new_whale[i] = comparison_whale[i] - A[i] * D
-        if new_whale[i] > max_range[i]:
-            new_whale[i] = max_range[i]
-        elif new_whale[i] < min_range[i]:
-            new_whale[i] == min_range[i]
-        return (compute_f(new_whale), new_whale)
+def find_furthest_away(random_whales, whale):
+    if calcDistance(random_whales[0][1], whale[1], n) >= calcDistance(
+        random_whales[1][1], whale[1], n
+    ):
+        return random_whales[0]
+    else:
+        return random_whales[1]
 
 
-def attacking_whale(
-    n, new_whale, comparison_whale, whale, C, A, max_range, min_range, l, b
+def mean_whales(random_whales):
+    return (0, [(x + y) / 2 for x, y in zip(random_whales[0][1], random_whales[1][1])])
+
+
+def population_encircle(
+    n, population, fittest_whale, C, A, max_range, min_range, group_size
 ):
-    for i in range(n):
-        D = abs(comparison_whale[1][i] - whale[1][i])
-        new_whale[i] = (
-            comparison_whale[1][i] + math.exp(l * b) * math.cos(2 * math.pi * l) * D
-        )
-        if new_whale[i] > max_range[i]:
-            new_whale[i] = max_range[i]
-        elif new_whale[i] < min_range[i]:
-            new_whale[i] == min_range[i]
-    return (compute_f(new_whale), new_whale)
+    group = random.sample(population, group_size)
+
+    for whale in group:
+        index = population.index(whale)
+        new_whale = [0] * n
+        for i in range(n):
+            new_whale[i] = fittest_whale[1][i] - A[i] * abs(
+                C[i] * fittest_whale[1][i] - whale[1][i]
+            )
+            if new_whale[i] > max_range[i]:
+                new_whale[i] = max_range[i]
+            elif new_whale[i] < min_range[i]:
+                new_whale[i] = min_range[i]
+        new_whale_fitness = compute_f(new_whale)
+        # only update if the solution is better then the original
+        if new_whale_fitness < whale[0]:
+            population[index] = (new_whale_fitness, new_whale)
+    return population
+
+
+def population_attack(
+    n,
+    new_whale,
+    population,
+    fittest_whale,
+    max_range,
+    min_range,
+    group_size,
+    l,
+    b,
+):
+    group = random.sample(population, group_size)
+
+    for whale in group:
+        index = population.index(whale)
+        new_whale = [0] * n
+        for i in range(n):
+            D = abs(fittest_whale[1][i] - whale[1][i])
+            new_whale[i] = (
+                fittest_whale[1][i] + math.exp(l * b) * math.cos(2 * math.pi * l) * D
+            )
+            if new_whale[i] > max_range[i]:
+                new_whale[i] = max_range[i]
+            elif new_whale[i] < min_range[i]:
+                new_whale[i] = min_range[i]
+        # only update if the new whale is better then the previous
+        new_whale_fitness = compute_f(new_whale)
+        if new_whale_fitness < whale[0]:
+            population[index] = (new_whale_fitness, new_whale)
+    return population
 
 
 def whale_algorithm(n, num_cyc, N, b):
@@ -228,6 +280,7 @@ def whale_algorithm(n, num_cyc, N, b):
     - 'N' = number of whales                            int
     - 'b' = spiral constant                             float or int
     """
+
     # create the initial population and get the fittest whale
     population = create_population(N, n)
     fittest_whale = calc_fittest(population)
@@ -248,46 +301,78 @@ def whale_algorithm(n, num_cyc, N, b):
             for i in range(n):
                 r[i] = random.random()
                 C[i] = 2 * r[i]
-                A[i] = a * (2 * r[i] - 1)
-
+                A[i] = a * 2 * (r[i] - 1)
+            new_whale = [0] * n
             l = random.uniform(
                 -1, 1 - (2 * cycle) / num_cyc
             )  # ensures that it gets less as cycles increase
             p = random.random()
-            new_whale = [0] * n
-            if p < 0.8:
-                if abs(sum(A)) < l:  # circle A can be found differently
-                    population[i] = circle_whale(
-                        n, new_whale, fittest_whale, whale, C, A, max_range, min_range
+            if cycle < 0.5 * num_cyc:
+                random_whales = random.sample(population, 2)
+                if p < 0.5:
+                    """
+                    select two random solutions
+                    select the one with largest distance from present
+                    update using encircle
+                    accept if it is better
+                    """
+                    furthest_away = find_furthest_away(random_whales, whale)
+                    new_whale = circle_whale(
+                        n, new_whale, furthest_away, whale, C, A, max_range, min_range
                     )
-                else:  # search
-                    population[i] = search_whale(
+                    if new_whale[0] > whale[0]:
+                        new_whale = whale
+                    population[i] = new_whale
+
+                else:
+                    """
+                    select two random solutions
+                    take their means
+                    go towards them
+                    accept if it is better"""
+                    mean_whale = mean_whales(random_whales)
+                    new_whale = circle_whale(
+                        n, new_whale, mean_whale, whale, C, A, max_range, min_range
+                    )
+                    # check if the new whale is a better solution
+                    if new_whale[0] > whale[0]:
+                        new_whale = whale
+                    population[i] = new_whale
+            else:
+                if p > 0.5:
+                    """circle a group of solutions
+                    accept new solutiosn if they are better"""
+
+                    population = population_encircle(
                         n,
-                        new_whale,
-                        random.choice(population)[1],
-                        whale,
+                        population,
+                        fittest_whale,
                         C,
                         A,
                         max_range,
                         min_range,
+                        group_size,
                     )
-
-            else:
-                population[i] = attacking_whale(
-                    n, new_whale, fittest_whale, whale, C, A, max_range, min_range, l, b
-                )
-
+                else:
+                    """
+                    select a group update each usign a
+                    bubble net attack
+                    upate if better"""
+                    population = population_attack(
+                        n,
+                        new_whale,
+                        population,
+                        fittest_whale,
+                        max_range,
+                        min_range,
+                        group_size,
+                        l,
+                        b,
+                    )
         fittest_whale = calc_fittest(population)
         cycle += 1
+
     return fittest_whale
-
-
-"""
-ways to optimise:
-    changing the P chance
-    ammend the encircling formula
-
-    """
 
 
 def parameter_tuning(num_cyc_values, N_values, b_values):
@@ -328,7 +413,7 @@ num_cyc_values = [
 N_values = [70, 75, 80, 85, 90, 95, 100, 110, 120]
 b_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 # parameter_tuning(num_cyc_values, N_values, b_values)
-min_f, minimum = whale_algorithm(n, 100, 80, 0.3)
+min_f, minimum = whale_algorithm(n, 1000, 200, 0.3)
 
 ###########################################
 #### NOW INCLUDE THE REST OF YOUR CODE ####
